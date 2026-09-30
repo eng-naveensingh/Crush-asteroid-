@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: #030712;
+    color: #f3f4f6;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+
+  .font-arcade {
+    font-family: 'Chakra Petch', sans-serif;
+  }
+}
+
+/* Prevent canvas rubber-banding on iOS / mobile */
+canvas {
+  touch-action: none;
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "Crush Asteroid",
+  "description": "An action-packed 2D arcade space shooter where you pilot a spaceship, smash asteroids into pieces, survive evolving cosmic waves, and battle for the high score.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

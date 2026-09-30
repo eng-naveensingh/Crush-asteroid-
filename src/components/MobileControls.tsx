@@ -7,6 +7,8 @@ interface MobileControlsProps {
   onJoystickMove: (vector: { x: number; y: number; intensity: number; angle: number } | null) => void;
   onFire: (active: boolean) => void;
   onNuke: () => void;
+  onCycleWeapon?: () => void;
+  currentWeapon?: string;
   hasNuke: boolean;
 }
 
@@ -14,6 +16,8 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
   onJoystickMove,
   onFire,
   onNuke,
+  onCycleWeapon,
+  currentWeapon,
   hasNuke,
 }) => {
   const bindFire = () => {
@@ -57,7 +61,29 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
       </div>
 
       {/* Action Cluster (Right side) */}
-      <div className="pointer-events-auto flex items-end gap-3.5 pb-2">
+      <div className="pointer-events-auto flex items-end gap-2.5 pb-2">
+        {/* Switch Weapon Button */}
+        {onCycleWeapon && (
+          <button
+            onTouchStart={(e) => {
+              e.preventDefault();
+              soundManager.userInteraction();
+              onCycleWeapon();
+            }}
+            onClick={() => {
+              soundManager.userInteraction();
+              onCycleWeapon();
+            }}
+            aria-label="Switch Weapon"
+            className="w-14 h-14 flex flex-col items-center justify-center rounded-2xl bg-slate-900/80 active:bg-sky-600/50 border border-sky-400/60 text-sky-300 active:scale-95 transition-transform shadow-lg shadow-sky-950/40 backdrop-blur-md"
+          >
+            <span className="text-[11px] font-arcade font-bold">WEP</span>
+            <span className="text-[8px] font-mono text-slate-300 uppercase tracking-tighter truncate max-w-[48px]">
+              {currentWeapon || 'CYCLE'}
+            </span>
+          </button>
+        )}
+
         {/* Nuke Bomb Button (if acquired) */}
         {hasNuke && (
           <button
@@ -71,10 +97,10 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
               onNuke();
             }}
             aria-label="Detonate EMP Nuke"
-            className="w-15 h-15 flex flex-col items-center justify-center rounded-2xl bg-rose-950/80 active:bg-rose-600/70 border-2 border-rose-500/80 text-rose-300 active:scale-95 transition-transform shadow-xl shadow-rose-950/60"
+            className="w-14 h-14 flex flex-col items-center justify-center rounded-2xl bg-rose-950/80 active:bg-rose-600/70 border-2 border-rose-500/80 text-rose-300 active:scale-95 transition-transform shadow-xl shadow-rose-950/60"
           >
-            <Zap className="w-6 h-6 animate-pulse" />
-            <span className="text-[10px] font-arcade font-bold tracking-tight">EMP</span>
+            <Zap className="w-5 h-5 animate-pulse" />
+            <span className="text-[9px] font-arcade font-bold tracking-tight">EMP</span>
           </button>
         )}
 

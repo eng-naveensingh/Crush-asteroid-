@@ -1,18 +1,16 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState } from 'react';
-import { Play, RotateCcw, Volume2, VolumeX, Music, Shield, Zap, Crosshair, ChevronRight, HelpCircle, Trophy } from 'lucide-react';
-import { ControlScheme, GameState } from '../types/game';
+import { Play, RotateCcw, Volume2, VolumeX, Music, Shield, Zap, Crosshair, ChevronRight, HelpCircle, Trophy, Bot } from 'lucide-react';
+import { ControlScheme, GameState, ShipModelId } from '../types/game';
 import { soundManager } from '../audio/SoundEffects';
+import { ShipSelect } from './ShipSelect';
 
 interface StartMenuProps {
   onStart: () => void;
   highScore: number;
   controlScheme: ControlScheme;
   onSetControlScheme: (scheme: ControlScheme) => void;
+  selectedShipModel: ShipModelId;
+  onSelectShipModel: (modelId: ShipModelId) => void;
   sfxMuted: boolean;
   musicMuted: boolean;
   onToggleSfx: () => void;
@@ -25,6 +23,8 @@ export const StartMenu: React.FC<StartMenuProps> = ({
   highScore,
   controlScheme,
   onSetControlScheme,
+  selectedShipModel,
+  onSelectShipModel,
   sfxMuted,
   musicMuted,
   onToggleSfx,
@@ -35,7 +35,7 @@ export const StartMenu: React.FC<StartMenuProps> = ({
 
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto">
-      <div className="w-full max-w-xl my-auto flex flex-col items-center text-center">
+      <div className="w-full max-w-xl my-auto flex flex-col items-center text-center py-6">
         {/* Title */}
         <div className="mb-2">
           <span className="text-xs uppercase tracking-[0.3em] text-sky-400 font-semibold">
@@ -47,13 +47,19 @@ export const StartMenu: React.FC<StartMenuProps> = ({
         </div>
 
         {/* High score callout */}
-        <div className="flex items-center gap-2 mb-8 text-sm text-slate-300">
+        <div className="flex items-center gap-2 mb-4 text-sm text-slate-300">
           <Trophy className="w-4 h-4 text-amber-400" />
           <span>All-Time High Score:</span>
           <span className="font-arcade font-bold text-amber-400 tabular-nums">
             {highScore.toLocaleString()}
           </span>
         </div>
+
+        {/* Starship Hangar Selection */}
+        <ShipSelect
+          selectedModel={selectedShipModel}
+          onSelectModel={onSelectShipModel}
+        />
 
         {/* Main action button */}
         <button
@@ -155,6 +161,25 @@ export const StartMenu: React.FC<StartMenuProps> = ({
                   <li><strong className="text-amber-300">Medium Asteroids (60 pts)</strong>: Split into 2-3 small fragments</li>
                   <li><strong className="text-slate-200">Small Asteroids (30 pts)</strong>: Completely obliterated</li>
                   <li><strong className="text-sky-300">Combo Multiplier</strong>: Destroy targets quickly for up to 5x points!</li>
+                </ul>
+              </div>
+              <div>
+                <p className="font-semibold text-white mb-1.5">Enemy Drone Fleet</p>
+                <ul className="space-y-1 text-slate-400">
+                  <li><strong className="text-red-400">Scout Drones (250 pts)</strong>: Fast erratic firing drones</li>
+                  <li><strong className="text-orange-400">Interceptors (450 pts)</strong>: Agile assault fighters</li>
+                  <li><strong className="text-pink-400">Heavy Cruisers (800 pts)</strong>: Twin heavy laser dreadnoughts</li>
+                  <li><strong className="text-emerald-300">Defeat all enemies & rocks</strong> to clear each wave!</li>
+                </ul>
+              </div>
+
+              <div>
+                <p className="font-semibold text-white mb-1.5">Weapon Arsenal [Keys 1-4 / Q]</p>
+                <ul className="space-y-1 text-slate-400">
+                  <li><strong className="text-sky-400">[1] Blaster</strong>: Balanced rate of fire & standard damage</li>
+                  <li><strong className="text-amber-400">[2] Vulcan MG</strong>: 18 shots/sec shredding kinetic stream</li>
+                  <li><strong className="text-pink-400">[3] Laser Launcher</strong>: Slower high-yield piercing beam lance</li>
+                  <li><strong className="text-emerald-400">[4] Plasma Cannon</strong>: High-damage explosive kinetic spheres</li>
                 </ul>
               </div>
             </div>

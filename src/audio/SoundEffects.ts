@@ -105,6 +105,122 @@ class SoundManager {
     osc.stop(t + 0.13);
   }
 
+  public playMachineGun() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(420 + Math.random() * 80, t);
+    osc.frequency.exponentialRampToValueAtTime(70, t + 0.045);
+
+    gain.gain.setValueAtTime(this.sfxVolume * 0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.05);
+  }
+
+  public playLaserLauncher() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1400, t);
+    osc.frequency.exponentialRampToValueAtTime(260, t + 0.22);
+
+    gain.gain.setValueAtTime(this.sfxVolume * 0.45, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.23);
+  }
+
+  public playPlasmaShot() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.18);
+
+    gain.gain.setValueAtTime(this.sfxVolume * 0.35, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.19);
+  }
+
+  public playEnemyLaser() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(520, t);
+    osc.frequency.exponentialRampToValueAtTime(140, t + 0.16);
+
+    gain.gain.setValueAtTime(this.sfxVolume * 0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.17);
+  }
+
+  public playEnemyAlarm() {
+    if (!this.sfxEnabled) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(320, t);
+    osc.frequency.setValueAtTime(480, t + 0.08);
+    osc.frequency.setValueAtTime(320, t + 0.16);
+
+    gain.gain.setValueAtTime(this.sfxVolume * 0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    osc.start(t);
+    osc.stop(t + 0.25);
+  }
+
   public playAsteroidHit() {
     if (!this.sfxEnabled) return;
     this.initCtx();

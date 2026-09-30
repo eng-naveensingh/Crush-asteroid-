@@ -16,7 +16,12 @@ import {
   PowerUpType,
   Ship,
   Star,
+  EnemyBot,
+  ShipModelId,
+  WeaponType,
 } from '../types/game';
+import { SHIP_PRESETS } from '../types/ships';
+import { WEAPON_PRESETS } from '../types/weapons';
 import { soundManager } from '../audio/SoundEffects';
 
 export class GameEngine {
@@ -37,6 +42,7 @@ export class GameEngine {
   public onHealthChange?: (health: number, shield: number) => void;
   public onComboChange?: (combo: number) => void;
   public onWaveCleared?: (wave: number, scoreBonus: number) => void;
+  public onWeaponChange?: (weapon: WeaponType) => void;
 
   // Stats
   public score: number = 0;
@@ -50,9 +56,13 @@ export class GameEngine {
   public combo: number = 0;
   public comboTimer: number = 0;
 
+  public selectedShipModel: ShipModelId = 'interceptor';
+  public selectedWeapon: WeaponType = 'blaster';
+
   // Entities
   private ship: Ship;
   private asteroids: Asteroid[] = [];
+  private enemyBots: EnemyBot[] = [];
   private bullets: Bullet[] = [];
   private particles: Particle[] = [];
   private powerUps: PowerUp[] = [];
@@ -61,7 +71,7 @@ export class GameEngine {
 
   // Firing rate control
   private lastShotTime: number = 0;
-  private baseFireCooldown: number = 0.16; // ~6 shots/sec default
+  private baseFireCooldown: number = 0.15;
 
   // Input states
   public keys: Record<string, boolean> = {};
@@ -124,7 +134,36 @@ export class GameEngine {
     this.controlScheme = scheme;
   }
 
+  public setShipModel(modelId: ShipModelId) {
+    this.selectedShipModel = modelId;
+    const cfg = SHIP_PRESETS[modelId] || SHIP_PRESETS.interceptor;
+    this.baseFireCooldown = cfg.baseFireCooldown;
+    if (this.ship) {
+      this.ship.modelId = modelId;
+      this.ship.maxShield = cfg.maxShield;
+      this.ship.maxHealth = cfg.maxHealth;
+      this.ship.shield = Math.min(this.ship.shield, cfg.maxShield);
+      this.ship.health = Math.min(this.ship.health, cfg.maxHealth);
+    }
+  }
+
+  public setWeapon(weapon: WeaponType) {
+    this.selectedWeapon = weapon;
+    this.onWeaponChange?.(weapon);
+    const wep = WEAPON_PRESETS[weapon];
+    this.addFloatingText(this.ship.x, this.ship.y - 25, wep.shortName, wep.color, 16);
+  }
+
+  public cycleWeapon() {
+    const list: WeaponType[] = ['blaster', 'machinegun', 'laserlauncher', 'plasma'];
+    const curIdx = list.indexOf(this.selectedWeapon);
+    const nextIdx = (curIdx + 1) % list.length;
+    this.setWeapon(list[nextIdx]);
+  }
+
   private createDefaultShip(): Ship {
+    const cfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
+    this.baseFireCooldown = cfg.baseFireCooldown;
     return {
       x: this.canvas.width / 2,
       y: this.canvas.height / 2,
@@ -137,14 +176,15 @@ export class GameEngine {
       rotLeft: false,
       rotRight: false,
       firing: false,
-      health: 100,
-      maxHealth: 100,
-      shield: 100,
-      maxShield: 100,
+      health: cfg.maxHealth,
+      maxHealth: cfg.maxHealth,
+      shield: cfg.maxShield,
+      maxShield: cfg.maxShield,
       invulnerableTime: 3.0,
       spreadShotTime: 0,
       rapidFireTime: 0,
       hasNuke: false,
+      modelId: this.selectedShipModel,
     };
   }
 
@@ -204,6 +244,7 @@ export class GameEngine {
     this.particles = [];
     this.powerUps = [];
     this.floatingTexts = [];
+    this.enemyBots = [];
 
     this.ship = this.createDefaultShip();
     this.ship.x = this.canvas.width / 2;
@@ -263,6 +304,8 @@ export class GameEngine {
 
   private spawnWave(waveNum: number) {
     this.asteroids = [];
+    this.enemyBots = [];
+
     // Progressive asteroid counts
     // Wave 1: 4 large asteroids
     // Wave 2: 5 large + 1 medium
@@ -281,8 +324,115 @@ export class GameEngine {
       }
     }
 
+    // Spawn Enemy Bot ships!
+    // Wave 1: 1 scout drone
+    // Wave 2: 2 scouts
+    // Wave 3: 1 interceptor + 1 scout
+    // Wave 4+: mix of interceptors, cruisers, and scouts
+    if (waveNum === 1) {
+      this.spawnEnemyBot('scout');
+    } else if (waveNum === 2) {
+      this.spawnEnemyBot('scout');
+      this.spawnEnemyBot('scout');
+    } else if (waveNum === 3) {
+      this.spawnEnemyBot('interceptor');
+      this.spawnEnemyBot('scout');
+    } else {
+      const botCount = Math.min(2 + Math.floor(waveNum / 2), 6);
+      for (let b = 0; b < botCount; b++) {
+        const type = b === 0 && waveNum >= 4 ? 'cruiser' : b % 2 === 0 ? 'interceptor' : 'scout';
+        this.spawnEnemyBot(type);
+      }
+    }
+
     this.waveTotalAsteroids = this.asteroids.length;
     this.addFloatingText(this.canvas.width / 2, this.canvas.height / 3, `WAVE ${waveNum}`, '#38bdf8', 36);
+    if (this.enemyBots.length > 0) {
+      soundManager.playEnemyAlarm();
+      this.addFloatingText(this.canvas.width / 2, this.canvas.height / 3 + 45, `HOSTILE DRONES DETECTED!`, '#ef4444', 20);
+    }
+  }
+
+  private spawnEnemyBot(type: 'scout' | 'interceptor' | 'cruiser') {
+    const edge = Math.floor(Math.random() * 4);
+    let x = 0;
+    let y = 0;
+    const pad = 35;
+
+    switch (edge) {
+      case 0: // top
+        x = Math.random() * this.canvas.width;
+        y = -pad;
+        break;
+      case 1: // right
+        x = this.canvas.width + pad;
+        y = Math.random() * this.canvas.height;
+        break;
+      case 2: // bottom
+        x = Math.random() * this.canvas.width;
+        y = this.canvas.height + pad;
+        break;
+      case 3: // left
+        x = -pad;
+        y = Math.random() * this.canvas.height;
+        break;
+    }
+
+    let radius = 16;
+    let health = 40;
+    let shield = 20;
+    let speed = 120;
+    let fireCooldown = 2.2;
+    let points = 250;
+    let color = '#ef4444';
+    let accentColor = '#991b1b';
+    let glowColor = 'rgba(239, 68, 68, 0.4)';
+
+    if (type === 'interceptor') {
+      radius = 18;
+      health = 60;
+      shield = 40;
+      speed = 170;
+      fireCooldown = 1.5;
+      points = 450;
+      color = '#f97316';
+      accentColor = '#c2410c';
+      glowColor = 'rgba(249, 115, 22, 0.4)';
+    } else if (type === 'cruiser') {
+      radius = 26;
+      health = 130;
+      shield = 80;
+      speed = 85;
+      fireCooldown = 1.8;
+      points = 800;
+      color = '#ec4899';
+      accentColor = '#be185d';
+      glowColor = 'rgba(236, 72, 153, 0.45)';
+    }
+
+    this.enemyBots.push({
+      id: Math.random().toString(36).substring(2, 9),
+      type,
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      rotation: Math.random() * Math.PI * 2,
+      radius,
+      health,
+      maxHealth: health,
+      shield,
+      maxShield: shield,
+      color,
+      accentColor,
+      glowColor,
+      speed,
+      fireCooldown,
+      lastShotTime: performance.now() / 1000 + Math.random() * 1.5,
+      targetAngle: 0,
+      aiTimer: Math.random() * 0.8,
+      points,
+    });
   }
 
   private spawnAsteroid(
@@ -422,6 +572,7 @@ export class GameEngine {
     this.updateShip(dt);
     this.updateBullets(dt);
     this.updateAsteroids(dt);
+    this.updateEnemyBots(dt);
     this.updatePowerUps(dt);
     this.updateParticles(dt);
     this.updateFloatingTexts(dt);
@@ -436,14 +587,15 @@ export class GameEngine {
       }
     }
 
-    // Shield passive regeneration when safe
+    // Shield passive regeneration based on ship model preset
+    const cfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
     if (this.ship.shield < this.ship.maxShield && this.ship.invulnerableTime <= 0) {
-      this.ship.shield = Math.min(this.ship.maxShield, this.ship.shield + dt * 4); // +4 per second
+      this.ship.shield = Math.min(this.ship.maxShield, this.ship.shield + dt * cfg.shieldRechargeRate);
       this.onHealthChange?.(this.ship.health, this.ship.shield);
     }
 
-    // Check wave completion
-    if (this.asteroids.length === 0 && this.state === 'PLAYING') {
+    // Check wave completion (Both asteroids AND enemy bots destroyed!)
+    if (this.asteroids.length === 0 && this.enemyBots.length === 0 && this.state === 'PLAYING') {
       this.waveClearDelay += dt;
       if (this.waveClearDelay > 0.8) {
         this.waveClearDelay = 0;
@@ -504,15 +656,17 @@ export class GameEngine {
   }
 
   private updateShip(dt: number) {
+    const cfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
+
     // Rotation (Classic mode without active joystick)
     if (this.controlScheme === 'CLASSIC' && !this.ship.joystickVector) {
-      const rotSpeed = 3.6; // rad/s
+      const rotSpeed = cfg.rotSpeed; // rad/s from preset
       if (this.ship.rotLeft) this.ship.rotation -= rotSpeed * dt;
       if (this.ship.rotRight) this.ship.rotation += rotSpeed * dt;
     }
 
     // Thrust acceleration
-    const baseThrustPower = 360;
+    const baseThrustPower = cfg.thrustPower;
     const thrustPower = this.ship.joystickVector
       ? baseThrustPower * Math.max(0.35, this.ship.joystickVector.intensity)
       : baseThrustPower;
@@ -526,7 +680,7 @@ export class GameEngine {
       this.ship.vx += ax * dt;
       this.ship.vy += ay * dt;
 
-      // Exhaust particles
+      // Exhaust particles with ship accent color
       if (Math.random() < 0.85) {
         const exhaustAngle = this.ship.rotation + Math.PI + (Math.random() - 0.5) * 0.4;
         const exhaustSpeed = 90 + Math.random() * 80;
@@ -537,7 +691,7 @@ export class GameEngine {
           vx: Math.cos(exhaustAngle) * exhaustSpeed + this.ship.vx * 0.3,
           vy: Math.sin(exhaustAngle) * exhaustSpeed + this.ship.vy * 0.3,
           radius: Math.random() * 3 + 2,
-          color: Math.random() < 0.6 ? '#f97316' : '#facc15',
+          color: Math.random() < 0.6 ? cfg.primaryColor : '#facc15',
           alpha: 0.9,
           decay: 3.5,
           type: 'spark',
@@ -557,7 +711,7 @@ export class GameEngine {
     this.ship.vx *= Math.pow(friction, dt * 60);
     this.ship.vy *= Math.pow(friction, dt * 60);
     const speed = Math.hypot(this.ship.vx, this.ship.vy);
-    const maxSpeed = 380;
+    const maxSpeed = cfg.maxSpeed;
     if (speed > maxSpeed) {
       this.ship.vx = (this.ship.vx / speed) * maxSpeed;
       this.ship.vy = (this.ship.vy / speed) * maxSpeed;
@@ -583,7 +737,11 @@ export class GameEngine {
 
     // Continuous shooting handling
     if (this.ship.firing) {
-      const cooldown = this.ship.rapidFireTime > 0 ? this.baseFireCooldown * 0.5 : this.baseFireCooldown;
+      const wep = WEAPON_PRESETS[this.selectedWeapon] || WEAPON_PRESETS.blaster;
+      let cooldown = wep.cooldown;
+      if (this.ship.rapidFireTime > 0) {
+        cooldown *= 0.55;
+      }
       const now = performance.now() / 1000;
       if (now - this.lastShotTime >= cooldown) {
         this.fireBullet();
@@ -611,15 +769,44 @@ export class GameEngine {
   }
 
   private fireBullet() {
-    const bulletSpeed = 650;
+    const shipCfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
+    const wep = WEAPON_PRESETS[this.selectedWeapon] || WEAPON_PRESETS.blaster;
+
+    // Calculate effective weapon stats combining ship firepower factor
+    const firepowerMult = shipCfg.stats.firepower / 3.0; // scale from 1 to 5 (0.66x - 1.66x)
+    const bulletDamage = wep.damage * firepowerMult;
+    const bulletSpeed = wep.bulletSpeed;
     const hasSpread = this.ship.spreadShotTime > 0;
     this.shotsFired++;
 
-    soundManager.playLaser(hasSpread);
+    // Weapon specific sound effect
+    switch (wep.soundType) {
+      case 'machinegun':
+        soundManager.playMachineGun();
+        break;
+      case 'laserlauncher':
+        soundManager.playLaserLauncher();
+        break;
+      case 'plasma':
+        soundManager.playPlasmaShot();
+        break;
+      default:
+        soundManager.playLaser(hasSpread);
+        break;
+    }
 
     const tipOffset = this.ship.radius + 4;
     const startX = this.ship.x + Math.cos(this.ship.rotation) * tipOffset;
     const startY = this.ship.y + Math.sin(this.ship.rotation) * tipOffset;
+
+    // Slight recoil kick on ship
+    if (wep.id === 'laserlauncher') {
+      this.ship.vx -= Math.cos(this.ship.rotation) * 45;
+      this.ship.vy -= Math.sin(this.ship.rotation) * 45;
+    } else if (wep.id === 'machinegun') {
+      this.ship.vx -= Math.cos(this.ship.rotation) * 6;
+      this.ship.vy -= Math.sin(this.ship.rotation) * 6;
+    }
 
     if (hasSpread) {
       // 3-way spread shot
@@ -629,43 +816,55 @@ export class GameEngine {
           id: Math.random().toString(36).substring(2, 9),
           x: startX,
           y: startY,
-          vx: Math.cos(ang) * bulletSpeed + this.ship.vx * 0.25,
-          vy: Math.sin(ang) * bulletSpeed + this.ship.vy * 0.25,
-          radius: 3.5,
-          color: '#38bdf8',
-          lifespan: 1.1,
+          vx: Math.cos(ang) * bulletSpeed + this.ship.vx * 0.2,
+          vy: Math.sin(ang) * bulletSpeed + this.ship.vy * 0.2,
+          radius: wep.bulletRadius,
+          color: wep.color,
+          lifespan: wep.id === 'laserlauncher' ? 0.9 : 1.1,
           maxLifespan: 1.1,
-          damage: 1,
+          damage: bulletDamage,
           isPlayer: true,
+          weaponType: wep.id,
+          pierce: wep.pierce,
+          pierceCount: wep.pierce ? 3 : 0,
         });
       });
     } else {
-      // Standard laser bullet
+      // Weapon specific single/spread trajectory
+      let shotAngle = this.ship.rotation;
+      if (wep.spreadAngle) {
+        shotAngle += (Math.random() - 0.5) * wep.spreadAngle;
+      }
+
       this.bullets.push({
         id: Math.random().toString(36).substring(2, 9),
         x: startX,
         y: startY,
-        vx: Math.cos(this.ship.rotation) * bulletSpeed + this.ship.vx * 0.25,
-        vy: Math.sin(this.ship.rotation) * bulletSpeed + this.ship.vy * 0.25,
-        radius: 3,
-        color: '#facc15',
-        lifespan: 1.2,
+        vx: Math.cos(shotAngle) * bulletSpeed + this.ship.vx * 0.2,
+        vy: Math.sin(shotAngle) * bulletSpeed + this.ship.vy * 0.2,
+        radius: wep.bulletRadius,
+        color: wep.color,
+        lifespan: wep.id === 'machinegun' ? 0.95 : wep.id === 'laserlauncher' ? 1.0 : 1.2,
         maxLifespan: 1.2,
-        damage: 1,
+        damage: bulletDamage,
         isPlayer: true,
+        weaponType: wep.id,
+        pierce: wep.pierce,
+        pierceCount: wep.pierce ? 3 : 0,
       });
     }
 
-    // Small muzzle flash particle
+    // Weapon muzzle flash particle
+    const flashRadius = wep.id === 'laserlauncher' ? 11 : wep.id === 'plasma' ? 9 : 5;
     this.particles.push({
       x: startX,
       y: startY,
       vx: this.ship.vx * 0.2,
       vy: this.ship.vy * 0.2,
-      radius: 6,
-      color: hasSpread ? '#38bdf8' : '#fef08a',
+      radius: flashRadius,
+      color: wep.color,
       alpha: 1,
-      decay: 12,
+      decay: wep.id === 'machinegun' ? 24 : 14,
       type: 'glow',
     });
   }
@@ -731,6 +930,135 @@ export class GameEngine {
     }
   }
 
+  private updateEnemyBots(dt: number) {
+    const now = performance.now() / 1000;
+
+    for (let i = this.enemyBots.length - 1; i >= 0; i--) {
+      const bot = this.enemyBots[i];
+
+      // AI Logic: Aim and steer toward player with evasive orbiting
+      bot.aiTimer -= dt;
+      const dx = this.ship.x - bot.x;
+      const dy = this.ship.y - bot.y;
+      const dist = Math.hypot(dx, dy);
+      const angleToPlayer = Math.atan2(dy, dx);
+
+      // Periodically update flight behavior
+      if (bot.aiTimer <= 0) {
+        bot.aiTimer = 0.4 + Math.random() * 0.4;
+        if (dist > 280) {
+          // Approach player
+          bot.targetAngle = angleToPlayer;
+        } else if (dist < 140) {
+          // Back off / strafe away
+          bot.targetAngle = angleToPlayer + Math.PI + (Math.random() - 0.5) * 0.8;
+        } else {
+          // Orbit around player
+          const orbitDir = (i % 2 === 0 ? 1 : -1) * (Math.PI / 2);
+          bot.targetAngle = angleToPlayer + orbitDir;
+        }
+      }
+
+      // Smooth turn towards target angle
+      let diff = bot.targetAngle - bot.rotation;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      const turnSpeed = bot.type === 'scout' ? 4.5 : bot.type === 'interceptor' ? 3.8 : 2.2;
+      bot.rotation += Math.sign(diff) * Math.min(Math.abs(diff), turnSpeed * dt);
+
+      // Accelerate forward in current facing direction
+      const thrust = bot.speed;
+      bot.vx += Math.cos(bot.rotation) * thrust * dt;
+      bot.vy += Math.sin(bot.rotation) * thrust * dt;
+
+      // Friction
+      bot.vx *= Math.pow(0.97, dt * 60);
+      bot.vy *= Math.pow(0.97, dt * 60);
+
+      // Position update
+      bot.x += bot.vx * dt;
+      bot.y += bot.vy * dt;
+
+      // Wrap or clamp within field
+      const pad = bot.radius + 10;
+      if (bot.x < -pad) bot.x = this.canvas.width + pad;
+      else if (bot.x > this.canvas.width + pad) bot.x = -pad;
+      if (bot.y < -pad) bot.y = this.canvas.height + pad;
+      else if (bot.y > this.canvas.height + pad) bot.y = -pad;
+
+      // Engine trail sparks
+      if (Math.random() < 0.6) {
+        const exhaustAngle = bot.rotation + Math.PI + (Math.random() - 0.5) * 0.5;
+        this.particles.push({
+          x: bot.x - Math.cos(bot.rotation) * bot.radius,
+          y: bot.y - Math.sin(bot.rotation) * bot.radius,
+          vx: Math.cos(exhaustAngle) * 50,
+          vy: Math.sin(exhaustAngle) * 50,
+          radius: 2,
+          color: bot.color,
+          alpha: 0.8,
+          decay: 4.0,
+          type: 'spark',
+        });
+      }
+
+      // Shield regeneration
+      if (bot.shield < bot.maxShield) {
+        bot.shield = Math.min(bot.maxShield, bot.shield + dt * 2.5);
+      }
+
+      // Enemy Bot Shooting
+      // Only shoot if in front arc and line-of-sight distance
+      if (this.state === 'PLAYING' && now - bot.lastShotTime >= bot.fireCooldown) {
+        const aimDiff = Math.abs(diff);
+        if (aimDiff < 0.7 && dist < 500) {
+          bot.lastShotTime = now;
+          soundManager.playEnemyLaser();
+
+          const bSpeed = 380;
+          const tipOffset = bot.radius + 4;
+          const bStartX = bot.x + Math.cos(bot.rotation) * tipOffset;
+          const bStartY = bot.y + Math.sin(bot.rotation) * tipOffset;
+
+          if (bot.type === 'cruiser') {
+            // Twin heavy plasma bolts
+            [-0.15, 0.15].forEach((angOffset) => {
+              const shotAng = bot.rotation + angOffset;
+              this.bullets.push({
+                id: Math.random().toString(36).substring(2, 9),
+                x: bStartX,
+                y: bStartY,
+                vx: Math.cos(shotAng) * bSpeed,
+                vy: Math.sin(shotAng) * bSpeed,
+                radius: 4,
+                color: bot.color,
+                lifespan: 1.8,
+                maxLifespan: 1.8,
+                damage: 25,
+                isPlayer: false,
+              });
+            });
+          } else {
+            // Red plasma bolt
+            this.bullets.push({
+              id: Math.random().toString(36).substring(2, 9),
+              x: bStartX,
+              y: bStartY,
+              vx: Math.cos(bot.rotation) * bSpeed,
+              vy: Math.sin(bot.rotation) * bSpeed,
+              radius: bot.type === 'interceptor' ? 3.5 : 2.8,
+              color: bot.color,
+              lifespan: 1.6,
+              maxLifespan: 1.6,
+              damage: bot.type === 'interceptor' ? 20 : 15,
+              isPlayer: false,
+            });
+          }
+        }
+      }
+    }
+  }
+
   private updatePowerUps(dt: number) {
     for (let i = this.powerUps.length - 1; i >= 0; i--) {
       const p = this.powerUps[i];
@@ -779,44 +1107,112 @@ export class GameEngine {
   // --- COLLISION DETECTION ---
 
   private checkCollisions() {
-    // 1. Bullets vs Asteroids
+    // 1. Bullets vs Asteroids & Enemy Bots
     bulletLoop: for (let bIdx = this.bullets.length - 1; bIdx >= 0; bIdx--) {
       const bullet = this.bullets[bIdx];
 
-      for (let aIdx = this.asteroids.length - 1; aIdx >= 0; aIdx--) {
-        const asteroid = this.asteroids[aIdx];
-        const dist = Math.hypot(bullet.x - asteroid.x, bullet.y - asteroid.y);
+      if (bullet.isPlayer) {
+        // Player bullet vs Asteroids
+        for (let aIdx = this.asteroids.length - 1; aIdx >= 0; aIdx--) {
+          const asteroid = this.asteroids[aIdx];
+          const dist = Math.hypot(bullet.x - asteroid.x, bullet.y - asteroid.y);
 
-        if (dist <= asteroid.radius + bullet.radius) {
-          // Bullet Hit!
-          this.shotsHit++;
-          this.bullets.splice(bIdx, 1);
+          if (dist <= asteroid.radius + bullet.radius) {
+            this.shotsHit++;
+            asteroid.health -= bullet.damage;
+            soundManager.playAsteroidHit();
 
-          asteroid.health -= bullet.damage;
-          soundManager.playAsteroidHit();
+            const hitAngle = Math.atan2(bullet.y - asteroid.y, bullet.x - asteroid.x);
+            for (let p = 0; p < 5; p++) {
+              const sparkAng = hitAngle + (Math.random() - 0.5) * 1.2;
+              const sparkSpeed = 60 + Math.random() * 80;
+              this.particles.push({
+                x: bullet.x,
+                y: bullet.y,
+                vx: Math.cos(sparkAng) * sparkSpeed,
+                vy: Math.sin(sparkAng) * sparkSpeed,
+                radius: Math.random() * 2 + 1,
+                color: bullet.color || '#facc15',
+                alpha: 1,
+                decay: 4.5,
+                type: 'spark',
+              });
+            }
 
-          // Spark particles at impact
-          const hitAngle = Math.atan2(bullet.y - asteroid.y, bullet.x - asteroid.x);
-          for (let p = 0; p < 5; p++) {
-            const sparkAng = hitAngle + (Math.random() - 0.5) * 1.2;
-            const sparkSpeed = 60 + Math.random() * 80;
-            this.particles.push({
-              x: bullet.x,
-              y: bullet.y,
-              vx: Math.cos(sparkAng) * sparkSpeed,
-              vy: Math.sin(sparkAng) * sparkSpeed,
-              radius: Math.random() * 2 + 1,
-              color: '#facc15',
-              alpha: 1,
-              decay: 4.5,
-              type: 'spark',
-            });
+            if (asteroid.health <= 0) {
+              this.destroyAsteroid(asteroid, false);
+            }
+
+            // Piercing beam mechanic: if bullet can pierce, decrement pierceCount
+            if (bullet.pierce && bullet.pierceCount && bullet.pierceCount > 1) {
+              bullet.pierceCount--;
+              bullet.damage *= 0.85; // slight falloff
+            } else {
+              this.bullets.splice(bIdx, 1);
+              continue bulletLoop;
+            }
           }
+        }
 
-          if (asteroid.health <= 0) {
-            this.destroyAsteroid(asteroid, false);
+        // Player bullet vs Enemy Bots
+        for (let eIdx = this.enemyBots.length - 1; eIdx >= 0; eIdx--) {
+          const bot = this.enemyBots[eIdx];
+          const dist = Math.hypot(bullet.x - bot.x, bullet.y - bot.y);
+
+          if (dist <= bot.radius + bullet.radius) {
+            this.shotsHit++;
+            soundManager.playAsteroidHit();
+
+            // Deal damage: shields first, then hull
+            if (bot.shield > 0) {
+              bot.shield -= bullet.damage * 25;
+              if (bot.shield < 0) {
+                bot.health += bot.shield;
+                bot.shield = 0;
+              }
+            } else {
+              bot.health -= bullet.damage * 35;
+            }
+
+            // Hit sparks
+            for (let p = 0; p < 6; p++) {
+              const sparkAng = Math.random() * Math.PI * 2;
+              this.particles.push({
+                x: bullet.x,
+                y: bullet.y,
+                vx: Math.cos(sparkAng) * 90,
+                vy: Math.sin(sparkAng) * 90,
+                radius: 2,
+                color: bot.color,
+                alpha: 1,
+                decay: 5.0,
+                type: 'spark',
+              });
+            }
+
+            if (bot.health <= 0) {
+              this.destroyEnemyBot(bot);
+            }
+
+            // Piercing check
+            if (bullet.pierce && bullet.pierceCount && bullet.pierceCount > 1) {
+              bullet.pierceCount--;
+              bullet.damage *= 0.85;
+            } else {
+              this.bullets.splice(bIdx, 1);
+              continue bulletLoop;
+            }
           }
-          continue bulletLoop;
+        }
+      } else {
+        // Enemy bullet vs Player ship
+        if (this.ship.invulnerableTime <= 0) {
+          const dist = Math.hypot(bullet.x - this.ship.x, bullet.y - this.ship.y);
+          if (dist <= this.ship.radius + bullet.radius) {
+            this.bullets.splice(bIdx, 1);
+            this.handlePlayerDamage(bullet.damage, bullet.x, bullet.y);
+            continue bulletLoop;
+          }
         }
       }
     }
@@ -832,6 +1228,18 @@ export class GameEngine {
           break;
         }
       }
+
+      // Ship vs Enemy Bots (Ramming collision)
+      for (let eIdx = this.enemyBots.length - 1; eIdx >= 0; eIdx--) {
+        const bot = this.enemyBots[eIdx];
+        const dist = Math.hypot(this.ship.x - bot.x, this.ship.y - bot.y);
+
+        if (dist <= bot.radius + this.ship.radius) {
+          this.destroyEnemyBot(bot);
+          this.handlePlayerDamage(50, bot.x, bot.y);
+          break;
+        }
+      }
     }
 
     // 3. Ship vs PowerUps
@@ -843,6 +1251,123 @@ export class GameEngine {
         this.collectPowerUp(powerUp);
         this.powerUps.splice(pIdx, 1);
       }
+    }
+  }
+
+  private destroyEnemyBot(bot: EnemyBot) {
+    const idx = this.enemyBots.indexOf(bot);
+    if (idx !== -1) {
+      this.enemyBots.splice(idx, 1);
+    }
+
+    soundManager.playShipExplosion();
+
+    // Score & Combo
+    this.combo++;
+    this.comboTimer = 2.8;
+    const mult = Math.min(this.combo, 5);
+    const earned = bot.points * mult;
+    this.score += earned;
+    this.saveHighScore();
+    this.emitUIUpdates();
+
+    this.addFloatingText(bot.x, bot.y - 15, `+${earned}`, '#f43f5e', 20);
+
+    // Bot explosion shockwave & debris
+    this.particles.push({
+      x: bot.x,
+      y: bot.y,
+      vx: 0,
+      vy: 0,
+      radius: bot.radius * 0.8,
+      color: bot.color,
+      alpha: 1,
+      decay: 2.2,
+      type: 'ring',
+    });
+
+    for (let i = 0; i < 25; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 180;
+      this.particles.push({
+        x: bot.x,
+        y: bot.y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        radius: Math.random() * 3 + 1,
+        color: Math.random() < 0.6 ? bot.color : '#fef08a',
+        alpha: 1,
+        decay: 2.0,
+        type: 'spark',
+      });
+    }
+
+    // High chance of dropping power-up!
+    if (Math.random() < 0.45) {
+      this.spawnPowerUp(bot.x, bot.y);
+    }
+  }
+
+  private handlePlayerDamage(damage: number, hitX: number, hitY: number) {
+    if (this.ship.invulnerableTime > 0) return;
+
+    if (this.ship.shield > 10) {
+      this.ship.shield -= damage;
+      soundManager.playShieldHit();
+      this.ship.invulnerableTime = 0.5;
+
+      const pushAng = Math.atan2(this.ship.y - hitY, this.ship.x - hitX);
+      this.ship.vx += Math.cos(pushAng) * 120;
+      this.ship.vy += Math.sin(pushAng) * 120;
+
+      if (this.ship.shield < 0) {
+        this.ship.health += this.ship.shield;
+        this.ship.shield = 0;
+      }
+      this.addFloatingText(this.ship.x, this.ship.y - 20, 'SHIELD HIT!', '#38bdf8', 16);
+      this.emitUIUpdates();
+
+      if (this.ship.health > 0) return;
+    }
+
+    // Hull damage / Life lost
+    soundManager.playShipExplosion();
+    this.lives--;
+    this.combo = 0;
+    this.onComboChange?.(0);
+
+    for (let i = 0; i < 35; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 60 + Math.random() * 220;
+      this.particles.push({
+        x: this.ship.x,
+        y: this.ship.y,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        radius: Math.random() * 4 + 1.5,
+        color: Math.random() < 0.5 ? '#ef4444' : '#f97316',
+        alpha: 1,
+        decay: 1.5,
+        type: 'spark',
+      });
+    }
+
+    if (this.lives > 0) {
+      const cfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
+      this.ship.x = this.canvas.width / 2;
+      this.ship.y = this.canvas.height / 2;
+      this.ship.vx = 0;
+      this.ship.vy = 0;
+      this.ship.rotation = -Math.PI / 2;
+      this.ship.invulnerableTime = 3.5;
+      this.ship.shield = cfg.maxShield;
+      this.ship.health = cfg.maxHealth;
+      this.addFloatingText(this.ship.x, this.ship.y - 30, 'RESPAWNING...', '#ef4444', 20);
+      this.emitUIUpdates();
+    } else {
+      this.saveHighScore();
+      this.setState('GAME_OVER');
+      this.emitUIUpdates();
     }
   }
 
@@ -1118,6 +1643,9 @@ export class GameEngine {
     // Render Asteroids
     this.renderAsteroids();
 
+    // Render Enemy Bots
+    this.renderEnemyBots();
+
     // Render Bullets
     this.renderBullets();
 
@@ -1176,6 +1704,7 @@ export class GameEngine {
   private renderShip() {
     const ctx = this.ctx;
     const ship = this.ship;
+    const cfg = SHIP_PRESETS[this.selectedShipModel] || SHIP_PRESETS.interceptor;
 
     // Invulnerability blinking
     if (ship.invulnerableTime > 0) {
@@ -1191,10 +1720,10 @@ export class GameEngine {
     if (ship.shield > 20 || ship.invulnerableTime > 0) {
       ctx.save();
       ctx.beginPath();
-      const shieldRadius = ship.radius * 1.5;
+      const shieldRadius = ship.radius * 1.55;
       ctx.arc(0, 0, shieldRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = ship.invulnerableTime > 0 ? 'rgba(56, 189, 248, 0.8)' : 'rgba(56, 189, 248, 0.35)';
-      ctx.lineWidth = ship.invulnerableTime > 0 ? 2 : 1.5;
+      ctx.strokeStyle = ship.invulnerableTime > 0 ? 'rgba(56, 189, 248, 0.85)' : cfg.glowColor;
+      ctx.lineWidth = ship.invulnerableTime > 0 ? 2.5 : 1.6;
       ctx.fillStyle = 'rgba(56, 189, 248, 0.08)';
       ctx.fill();
       ctx.stroke();
@@ -1206,53 +1735,158 @@ export class GameEngine {
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(-ship.radius * 0.7, -ship.radius * 0.45);
-      const flameLength = ship.radius * (1.3 + Math.random() * 0.6);
+      const flameLength = ship.radius * (1.3 + Math.random() * 0.7);
       ctx.lineTo(-flameLength, 0);
       ctx.lineTo(-ship.radius * 0.7, ship.radius * 0.45);
       ctx.closePath();
-      ctx.fillStyle = Math.random() < 0.5 ? '#f97316' : '#facc15';
-      ctx.shadowColor = '#f97316';
-      ctx.shadowBlur = 10;
+      ctx.fillStyle = Math.random() < 0.5 ? cfg.primaryColor : '#facc15';
+      ctx.shadowColor = cfg.primaryColor;
+      ctx.shadowBlur = 12;
       ctx.fill();
       ctx.restore();
     }
 
-    // Ship Body (Sleek sci-fi dart / interceptor)
+    // Custom Ship Geometries per Model Preset
     ctx.beginPath();
-    // Nose
-    ctx.moveTo(ship.radius * 1.3, 0);
-    // Right wing tip
-    ctx.lineTo(-ship.radius * 0.85, ship.radius * 0.9);
-    // Right wing notch
-    ctx.lineTo(-ship.radius * 0.45, ship.radius * 0.35);
-    // Engine bay center
-    ctx.lineTo(-ship.radius * 0.7, 0);
-    // Left wing notch
-    ctx.lineTo(-ship.radius * 0.45, -ship.radius * 0.35);
-    // Left wing tip
-    ctx.lineTo(-ship.radius * 0.85, -ship.radius * 0.9);
+    if (cfg.id === 'vanguard') {
+      // Heavy wide assault wings with dual nose cannons
+      ctx.moveTo(ship.radius * 1.2, -ship.radius * 0.35);
+      ctx.lineTo(ship.radius * 1.2, -ship.radius * 0.15);
+      ctx.lineTo(ship.radius * 0.8, 0);
+      ctx.lineTo(ship.radius * 1.2, ship.radius * 0.15);
+      ctx.lineTo(ship.radius * 1.2, ship.radius * 0.35);
+      ctx.lineTo(-ship.radius * 0.8, ship.radius * 1.15);
+      ctx.lineTo(-ship.radius * 0.5, ship.radius * 0.4);
+      ctx.lineTo(-ship.radius * 0.9, 0);
+      ctx.lineTo(-ship.radius * 0.5, -ship.radius * 0.4);
+      ctx.lineTo(-ship.radius * 0.8, -ship.radius * 1.15);
+    } else if (cfg.id === 'phantom') {
+      // Needle-sharp swept delta wing
+      ctx.moveTo(ship.radius * 1.6, 0);
+      ctx.lineTo(-ship.radius * 0.9, ship.radius * 0.75);
+      ctx.lineTo(-ship.radius * 0.4, 0);
+      ctx.lineTo(-ship.radius * 0.9, -ship.radius * 0.75);
+    } else if (cfg.id === 'titan') {
+      // Hexagonal armored dreadnought
+      ctx.moveTo(ship.radius * 1.1, 0);
+      ctx.lineTo(ship.radius * 0.6, ship.radius * 0.9);
+      ctx.lineTo(-ship.radius * 0.6, ship.radius * 1.1);
+      ctx.lineTo(-ship.radius * 0.9, 0);
+      ctx.lineTo(-ship.radius * 0.6, -ship.radius * 1.1);
+      ctx.lineTo(ship.radius * 0.6, -ship.radius * 0.9);
+    } else {
+      // Default Interceptor
+      ctx.moveTo(ship.radius * 1.35, 0);
+      ctx.lineTo(-ship.radius * 0.85, ship.radius * 0.9);
+      ctx.lineTo(-ship.radius * 0.45, ship.radius * 0.35);
+      ctx.lineTo(-ship.radius * 0.7, 0);
+      ctx.lineTo(-ship.radius * 0.45, -ship.radius * 0.35);
+      ctx.lineTo(-ship.radius * 0.85, -ship.radius * 0.9);
+    }
     ctx.closePath();
 
-    ctx.fillStyle = '#1e293b';
+    ctx.fillStyle = '#0f172a';
     ctx.fill();
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
-    ctx.shadowColor = '#0284c7';
-    ctx.shadowBlur = 8;
+    ctx.strokeStyle = cfg.primaryColor;
+    ctx.lineWidth = 2.2;
+    ctx.shadowColor = cfg.primaryColor;
+    ctx.shadowBlur = 9;
     ctx.stroke();
 
     // Cockpit Canopy
     ctx.beginPath();
-    ctx.ellipse(ship.radius * 0.15, 0, ship.radius * 0.45, ship.radius * 0.22, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#38bdf8';
+    ctx.ellipse(ship.radius * 0.15, 0, ship.radius * 0.4, ship.radius * 0.22, 0, 0, Math.PI * 2);
+    ctx.fillStyle = cfg.primaryColor;
     ctx.fill();
 
-    // Wing cannons
-    ctx.fillStyle = '#94a3b8';
-    ctx.fillRect(-ship.radius * 0.3, ship.radius * 0.75, ship.radius * 0.6, 2.5);
-    ctx.fillRect(-ship.radius * 0.3, -ship.radius * 0.75 - 2.5, ship.radius * 0.6, 2.5);
+    // Model specific wing weapons/armor details
+    if (cfg.id === 'vanguard') {
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(-ship.radius * 0.2, ship.radius * 0.85, ship.radius * 0.7, 3.5);
+      ctx.fillRect(-ship.radius * 0.2, -ship.radius * 0.85 - 3.5, ship.radius * 0.7, 3.5);
+    } else if (cfg.id === 'phantom') {
+      ctx.fillStyle = '#c084fc';
+      ctx.fillRect(0, ship.radius * 0.5, ship.radius * 0.6, 2);
+      ctx.fillRect(0, -ship.radius * 0.5 - 2, ship.radius * 0.6, 2);
+    }
 
     ctx.restore();
+  }
+
+  private renderEnemyBots() {
+    const ctx = this.ctx;
+
+    for (let i = 0; i < this.enemyBots.length; i++) {
+      const bot = this.enemyBots[i];
+      ctx.save();
+      ctx.translate(bot.x, bot.y);
+      ctx.rotate(bot.rotation);
+
+      // Enemy Shield Bubble
+      if (bot.shield > 5) {
+        ctx.beginPath();
+        ctx.arc(0, 0, bot.radius * 1.45, 0, Math.PI * 2);
+        ctx.strokeStyle = bot.glowColor;
+        ctx.lineWidth = 1.5;
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Enemy Bot Hull based on type
+      ctx.beginPath();
+      if (bot.type === 'scout') {
+        // Triangular swift drone
+        ctx.moveTo(bot.radius * 1.2, 0);
+        ctx.lineTo(-bot.radius * 0.8, bot.radius * 0.7);
+        ctx.lineTo(-bot.radius * 0.4, 0);
+        ctx.lineTo(-bot.radius * 0.8, -bot.radius * 0.7);
+      } else if (bot.type === 'interceptor') {
+        // Aggressive forward-swept fighter
+        ctx.moveTo(bot.radius * 1.3, 0);
+        ctx.lineTo(bot.radius * 0.6, bot.radius * 0.8);
+        ctx.lineTo(-bot.radius * 0.7, bot.radius * 0.7);
+        ctx.lineTo(-bot.radius * 0.4, 0);
+        ctx.lineTo(-bot.radius * 0.7, -bot.radius * 0.7);
+        ctx.lineTo(bot.radius * 0.6, -bot.radius * 0.8);
+      } else {
+        // Heavy Cruiser Diamond
+        ctx.moveTo(bot.radius * 1.2, 0);
+        ctx.lineTo(0, bot.radius * 0.9);
+        ctx.lineTo(-bot.radius * 1.1, 0);
+        ctx.lineTo(0, -bot.radius * 0.9);
+      }
+      ctx.closePath();
+
+      ctx.fillStyle = '#18181b';
+      ctx.fill();
+      ctx.strokeStyle = bot.color;
+      ctx.lineWidth = 2;
+      ctx.shadowColor = bot.color;
+      ctx.shadowBlur = 8;
+      ctx.stroke();
+
+      // Glowing red ocular sensor / core
+      ctx.beginPath();
+      ctx.arc(bot.radius * 0.2, 0, bot.radius * 0.28, 0, Math.PI * 2);
+      ctx.fillStyle = bot.color;
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 6;
+      ctx.fill();
+
+      // Health bar above bot if damaged
+      if (bot.health < bot.maxHealth || bot.shield < bot.maxShield) {
+        ctx.rotate(-bot.rotation);
+        const barW = bot.radius * 1.6;
+        const barH = 3;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(-barW / 2, -bot.radius - 10, barW, barH);
+        ctx.fillStyle = bot.color;
+        ctx.fillRect(-barW / 2, -bot.radius - 10, barW * (bot.health / bot.maxHealth), barH);
+      }
+
+      ctx.restore();
+    }
   }
 
   private renderAsteroids() {
@@ -1323,20 +1957,77 @@ export class GameEngine {
     for (let i = 0; i < this.bullets.length; i++) {
       const b = this.bullets[i];
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-      ctx.fillStyle = b.color;
-      ctx.shadowColor = b.color;
-      ctx.shadowBlur = 9;
-      ctx.fill();
 
-      // Bullet trail
-      ctx.beginPath();
-      ctx.moveTo(b.x, b.y);
-      ctx.lineTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02);
-      ctx.strokeStyle = b.color;
-      ctx.lineWidth = b.radius * 1.5;
-      ctx.stroke();
+      if (b.weaponType === 'laserlauncher') {
+        // High-energy glowing beam lance
+        ctx.beginPath();
+        const beamLength = 32;
+        const ang = Math.atan2(b.vy, b.vx);
+        ctx.moveTo(b.x + Math.cos(ang) * (beamLength * 0.4), b.y + Math.sin(ang) * (beamLength * 0.4));
+        ctx.lineTo(b.x - Math.cos(ang) * (beamLength * 0.6), b.y - Math.sin(ang) * (beamLength * 0.6));
+        ctx.strokeStyle = '#f472b6';
+        ctx.lineWidth = b.radius * 1.8;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = '#ec4899';
+        ctx.shadowBlur = 16;
+        ctx.stroke();
+
+        // White hot inner core
+        ctx.beginPath();
+        ctx.moveTo(b.x + Math.cos(ang) * (beamLength * 0.35), b.y + Math.sin(ang) * (beamLength * 0.35));
+        ctx.lineTo(b.x - Math.cos(ang) * (beamLength * 0.45), b.y - Math.sin(ang) * (beamLength * 0.45));
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = b.radius * 0.8;
+        ctx.stroke();
+      } else if (b.weaponType === 'machinegun') {
+        // Fast kinetic tracer bullet
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#fef08a';
+        ctx.shadowColor = '#f59e0b';
+        ctx.shadowBlur = 6;
+        ctx.fill();
+
+        // High-speed tracer tail
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x - b.vx * 0.024, b.y - b.vy * 0.024);
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+        ctx.lineWidth = b.radius * 1.2;
+        ctx.stroke();
+      } else if (b.weaponType === 'plasma') {
+        // Superheated plasma sphere with pulsating corona
+        const pulse = 1 + Math.sin(performance.now() * 0.02) * 0.15;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius * pulse, 0, Math.PI * 2);
+        ctx.fillStyle = '#10b981';
+        ctx.shadowColor = '#34d399';
+        ctx.shadowBlur = 18;
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius * 0.45, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      } else {
+        // Standard blaster
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+        ctx.fillStyle = b.color;
+        ctx.shadowColor = b.color;
+        ctx.shadowBlur = 9;
+        ctx.fill();
+
+        // Bullet trail
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02);
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = b.radius * 1.5;
+        ctx.stroke();
+      }
+
       ctx.restore();
     }
 

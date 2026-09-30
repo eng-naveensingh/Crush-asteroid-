@@ -1,10 +1,7 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React from 'react';
-import { Volume2, VolumeX, Music, Pause } from 'lucide-react';
+import { Volume2, VolumeX, Music, Pause, Flame, Zap, Shield, Crosshair } from 'lucide-react';
+import { WeaponType } from '../types/game';
+import { WEAPON_PRESETS } from '../types/weapons';
 import { soundManager } from '../audio/SoundEffects';
 
 interface HUDProps {
@@ -16,6 +13,8 @@ interface HUDProps {
   shield: number;
   combo: number;
   hasNuke: boolean;
+  selectedWeapon: WeaponType;
+  onSelectWeapon: (w: WeaponType) => void;
   onPause: () => void;
   sfxMuted: boolean;
   musicMuted: boolean;
@@ -32,14 +31,18 @@ export const HUD: React.FC<HUDProps> = ({
   shield,
   combo,
   hasNuke,
+  selectedWeapon,
+  onSelectWeapon,
   onPause,
   sfxMuted,
   musicMuted,
   onToggleSfx,
   onToggleMusic,
 }) => {
+  const weapons: WeaponType[] = ['blaster', 'machinegun', 'laserlauncher', 'plasma'];
+
   return (
-    <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-4 md:p-6 text-slate-100">
+    <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between p-3 md:p-6 text-slate-100">
       {/* Zone 1: Scores */}
       <div className="flex flex-col gap-1">
         <div className="flex items-baseline gap-2">
@@ -64,13 +67,44 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* Zone 2: Wave & Active Buffs */}
-      <div className="flex flex-col items-center">
-        <div className="font-arcade text-lg md:text-xl font-bold tracking-widest text-sky-400 uppercase">
+      {/* Zone 2: Wave & Weapon Arsenal Bar */}
+      <div className="flex flex-col items-center gap-2">
+        <div className="font-arcade text-base md:text-xl font-bold tracking-widest text-sky-400 uppercase">
           Wave {String(wave).padStart(2, '0')}
         </div>
+
+        {/* Weapon Armory Selector */}
+        <div className="pointer-events-auto flex items-center bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-lg backdrop-blur-md">
+          {weapons.map((wId, idx) => {
+            const wep = WEAPON_PRESETS[wId];
+            const isSelected = selectedWeapon === wId;
+            return (
+              <button
+                key={wId}
+                onClick={() => {
+                  soundManager.userInteraction();
+                  onSelectWeapon(wId);
+                }}
+                title={`${wep.name} - ${wep.description} [Key ${idx + 1}]`}
+                style={{
+                  color: isSelected ? wep.color : undefined,
+                  borderColor: isSelected ? wep.color : 'transparent',
+                }}
+                className={`px-2 py-1 rounded text-[10px] font-arcade tracking-wider transition-all duration-150 flex items-center gap-1 cursor-pointer border ${
+                  isSelected
+                    ? 'bg-slate-800 shadow-md font-bold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <span className="text-[9px] opacity-60 font-mono">[{idx + 1}]</span>
+                <span>{wep.shortName}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {hasNuke && (
-          <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-rose-400">
+          <div className="flex items-center gap-1 text-[11px] font-semibold text-rose-400 animate-pulse">
             <span className="inline-block w-2 h-2 rounded-full bg-rose-500 animate-ping" />
             <span>EMP READY [B]</span>
           </div>

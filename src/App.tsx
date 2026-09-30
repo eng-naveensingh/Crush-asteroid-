@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './game/GameEngine';
-import { ControlScheme, GameState } from './types/game';
+import { ControlScheme, GameState, ShipModelId, WeaponType } from './types/game';
 import { HUD } from './components/HUD';
 import { MobileControls } from './components/MobileControls';
 import { GameOverModal, PauseMenu, StartMenu, WaveClearModal } from './components/MenuOverlays';
@@ -18,6 +18,8 @@ export default function App() {
 
   // Synchronized Game UI state
   const [gameState, setGameState] = useState<GameState>('MENU');
+  const [selectedShipModel, setSelectedShipModel] = useState<ShipModelId>('interceptor');
+  const [selectedWeapon, setSelectedWeapon] = useState<WeaponType>('blaster');
   const [score, setScore] = useState<number>(0);
   const [highScore, setHighScore] = useState<number>(0);
   const [wave, setWave] = useState<number>(1);
@@ -81,6 +83,10 @@ export default function App() {
       setWaveClearBonus(bonus);
     };
 
+    engine.onWeaponChange = (newWeapon) => {
+      setSelectedWeapon(newWeapon);
+    };
+
     // Window resize handler
     const handleResize = () => {
       if (canvas && engine) {
@@ -100,6 +106,32 @@ export default function App() {
         } else if (engine.state === 'PAUSED') {
           engine.resumeGame();
         }
+        return;
+      }
+
+      // Weapon Hotkeys [1, 2, 3, 4] and [Q] to cycle weapon
+      if (e.code === 'Digit1') {
+        engine.setWeapon('blaster');
+        setSelectedWeapon('blaster');
+        return;
+      }
+      if (e.code === 'Digit2') {
+        engine.setWeapon('machinegun');
+        setSelectedWeapon('machinegun');
+        return;
+      }
+      if (e.code === 'Digit3') {
+        engine.setWeapon('laserlauncher');
+        setSelectedWeapon('laserlauncher');
+        return;
+      }
+      if (e.code === 'Digit4') {
+        engine.setWeapon('plasma');
+        setSelectedWeapon('plasma');
+        return;
+      }
+      if (e.code === 'KeyQ') {
+        engine.cycleWeapon();
         return;
       }
 
@@ -140,6 +172,14 @@ export default function App() {
     }
   };
 
+  // Sync ship model changes
+  const handleSelectShipModel = (modelId: ShipModelId) => {
+    setSelectedShipModel(modelId);
+    if (engineRef.current) {
+      engineRef.current.setShipModel(modelId);
+    }
+  };
+
   const handleToggleSfx = () => {
     const isMuted = !soundManager.toggleSfx();
     setSfxMuted(isMuted);
@@ -174,6 +214,19 @@ export default function App() {
     }
   };
 
+  const handleSelectWeapon = (weapon: WeaponType) => {
+    setSelectedWeapon(weapon);
+    if (engineRef.current) {
+      engineRef.current.setWeapon(weapon);
+    }
+  };
+
+  const handleCycleWeapon = () => {
+    if (engineRef.current) {
+      engineRef.current.cycleWeapon();
+    }
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 font-sans select-none">
       {/* 2D Canvas Viewport */}
@@ -193,6 +246,8 @@ export default function App() {
           shield={shield}
           combo={combo}
           hasNuke={hasNuke}
+          selectedWeapon={selectedWeapon}
+          onSelectWeapon={handleSelectWeapon}
           onPause={() => engineRef.current?.pauseGame()}
           sfxMuted={sfxMuted}
           musicMuted={musicMuted}
@@ -207,6 +262,8 @@ export default function App() {
           onJoystickMove={handleJoystickMove}
           onFire={handleMobileFire}
           onNuke={handleMobileNuke}
+          onCycleWeapon={handleCycleWeapon}
+          currentWeapon={selectedWeapon}
           hasNuke={hasNuke}
         />
       )}
@@ -218,6 +275,8 @@ export default function App() {
           highScore={highScore}
           controlScheme={controlScheme}
           onSetControlScheme={handleSetControlScheme}
+          selectedShipModel={selectedShipModel}
+          onSelectShipModel={handleSelectShipModel}
           sfxMuted={sfxMuted}
           musicMuted={musicMuted}
           onToggleSfx={handleToggleSfx}
